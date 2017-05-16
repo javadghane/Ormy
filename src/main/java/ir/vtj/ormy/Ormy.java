@@ -1,16 +1,26 @@
 package ir.vtj.ormy;
 
 import android.app.Application;
-import android.content.Context;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
+import android.util.Log;
 
 import com.google.gson.Gson;
 
+import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.lang.reflect.Field;
+import java.lang.reflect.Type;
+import java.util.List;
+
+import ir.vtj.ormy.OrmyException.OrmyException;
+import ir.vtj.ormy.OrmyType.PrimaryKey;
+
+import static com.google.gson.reflect.TypeToken.getParameterized;
 
 /**
  * Created by JavaDroid on 4/26/2017 in MEEDC-GIS department.
@@ -18,9 +28,8 @@ import java.io.PrintWriter;
  */
 
 public class Ormy {
-    public static Context context;
-    public static Application application;
-    public static String dbName;
+    private static Application application;
+    private static String dbName;
 
     private static String getFileName() {
         PackageManager m = application.getPackageManager();
@@ -35,10 +44,13 @@ public class Ormy {
     }
 
     public static void Init(Application app, String databaseName) {
-        context = app.getApplicationContext();
         application = app;
         dbName = databaseName;
-        makeFile(getFileName());
+        try {
+            makeFile(getFileName());
+        } catch (OrmyException.cantCreateDb cantCreateDb) {
+            cantCreateDb.printStackTrace();
+        }
     }
 
     private static void write(String text) {
@@ -47,11 +59,11 @@ public class Ormy {
             writer.println(text);
             writer.close();
         } catch (IOException e) {
-            Utile.toast(e.getMessage());
+            Log.e("Ormy", e.getMessage());
         }
     }
 
-    private static void makeFile(String sFileName) {
+    private static void makeFile(String sFileName) throws OrmyException.cantCreateDb {
         try {
             File root = new File(sFileName.substring(0, sFileName.indexOf("/")));
             if (!root.exists()) {
@@ -59,12 +71,29 @@ public class Ormy {
             }
             File gpxfile = new File(root, sFileName);
             FileWriter writer = new FileWriter(gpxfile);
-            //writer.append(sBody);
             writer.flush();
             writer.close();
         } catch (IOException e) {
-            e.printStackTrace();
+            throw new OrmyException.cantCreateDb("can't create " + getFileName());
         }
+    }
+
+    private static String read() throws OrmyException.databaseNotFound {
+        StringBuilder text = new StringBuilder();
+        try {
+            File file = new File(getFileName());
+
+            BufferedReader br = new BufferedReader(new FileReader(file));
+            String line;
+            while ((line = br.readLine()) != null) {
+                text.append(line);
+                text.append('\n');
+            }
+            br.close();
+        } catch (IOException e) {
+            throw new OrmyException.databaseNotFound(getFileName() + "not found!");
+        }
+        return text.toString();
     }
 
     public static void save(Object object) {
@@ -72,16 +101,29 @@ public class Ormy {
         String a = gson.toJson(object);
         write(a);
 
-       /* Class test = object.getClass();
-        Utile.toast("Fields" + test.getFields().length);
-
+        Class test = object.getClass();
         for (Field field : test.getFields()) {
-            OrmyType ormyTypeAnnotation = field.getAnnotation(OrmyType.class);
-            if (ormyTypeAnnotation != null)
-                ir.vtj.ormy.Utile.toast(ormyTypeAnnotation.isPrimaryKey() ? "True" : "False");
-            else
-                ir.vtj.ormy.Utile.toast("isNull");
-        }*/
+            PrimaryKey ormyTypeAnnotation = field.getAnnotation(PrimaryKey.class);
+            // if (ormyTypeAnnotation != null)
+            //ormyTypeAnnotation.isPrimaryKey()
+        }
+    }
+
+
+    public static <E> List<E> getList(final Type type) throws OrmyException.databaseNotFound {
+        String db = read();
+        return new Gson().fromJson(db, getParameterized(List.class, type).getType());
+    }
+
+
+    public static Object fetchSingleData(Class clazz) throws OrmyException.tableNotFound, OrmyException.databaseNotFound {
+        String db = read();
+        if (db.length() > 0) {
+            Gson gson = new Gson();
+            return gson.fromJson(db, clazz);
+        } else {
+            throw new OrmyException.tableNotFound("table " + clazz.getName() + " not found!");
+        }
     }
 
 
